@@ -1,0 +1,9 @@
+node_modules/
+keys.json
+LiveTrading.js
+apitests.js
+tickers.csv
+strategies.json
+tempStrat.json
+csv-test.js
+candledat.json

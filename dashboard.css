@@ -1,0 +1,19 @@
+body {
+    display: flex;
+}
+
+.leftStuff {
+    float: left;
+    border-radius: 4px;
+    background-color: #9be5dc;
+    max-width: 50%;
+}
+.leftStuff div {
+    padding: 15px;
+}
+.rightStuff {
+    float: right;
+}
+#apiTitle {
+    border-bottom: 1px solid;
+}

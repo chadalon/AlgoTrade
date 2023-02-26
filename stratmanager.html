@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <link rel="stylesheet" href="base.css">
+    <link rel="stylesheet" href="stratman.css">
+    <title>Strategy Manager</title>
+</head>
+<body>
+    <div id="top">
+        <button onclick="LoadTempStrat()">Load Previous State</button>
+        <button onclick="SaveStrategy()">Save Current Strategy</button>
+        <div id="apiSelect">
+            <label for="apisel">Using API:</label>
+            <select name="apisel" id="apisel" onchange="ChangeToken()">
+                <option value="none" class="none" selected="selected">Offline</option>
+            </select>
+        </div>
+    </div>
+    <div class="grid-container">
+        <div id="leftSide">
+            <div id="chooseStrat">
+                <label for="strats">Current Strat:</label>
+                <select name="strats" id="stratDropdown" onchange="ChangeStrat()">
+                    <option value="" selected="selected">New</option>
+
+                </select>
+                <button id="deleteStrat" onclick="DeleteCurrentStrat()">Delete</button>
+            </div>
+            <div id="indicatorList">
+                <div class="indBox" id="adder">
+                    <div class="dropdown">
+                        <div class="center">
+                            <button class="coolButt" onclick="IndicatorDropdown()">
+                                <div class="plus vPlus"></div>
+                                <div class="plus hPlus"></div>
+                            </button>
+                            <div id="indicatorSelect" class="dropdown-content">
+                                <a href="javascript:AddIndicator('MA')">Moving Average</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div id="rightSide">
+            <button id="getBal">Check Balances</button>
+            <p id="showBal"></p>
+            <button id="loadPairList" onclick="LoadPairList()">Load in pair list</button>
+
+        </div>
+    </div>
+    <div id="stratDesign">
+        <div id="topStratOptions">
+            <h1 style="margin: 0px;">Strategies</h1>
+            <div>
+                <label for="shortingBool">Shorting market:</label>
+                <input type="checkbox" id="shortingBool">
+            </div>
+        </div>
+        
+        <div id="stratBuy">
+            <h1>Buy: if </h1>
+            <div id="buyStratBox" class="stratBox">
+                
+            </div>
+            <div id="buyVariableDropdown" class="dropdown">
+                <div class="stratDropdownCenter">
+                    <button class="coolButt" onclick="VariableDropdown(true)">
+                        <div class="plus vPlus"></div>
+                        <div class="plus hPlus"></div>
+                    </button>
+                    <div id="buyVariableSelect" class="dropdown-content">
+                        <a href="javascript:AddBuyComparison('AND')">AND</a>
+                        <a href="javascript:AddBuyComparison('OR')">OR</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div id="stratSell">
+            <h1 style="display:inline;">Sell: if </h1>
+            <div id="sellStratBox" class="stratBox">
+
+            </div>
+            <div id="sellVariableDropdown" class="dropdown">
+                <div class="stratDropdownCenter">
+                    <button class="coolButt" onclick="VariableDropdown(false)">
+                        <div class="plus vPlus"></div>
+                        <div class="plus hPlus"></div>
+                    </button>
+                    <div id="sellVariableSelect" class="dropdown-content">
+                        <a href="javascript:AddSellComparison('AND')">AND</a>
+                        <a href="javascript:AddSellComparison('OR')">OR</a>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+        <div id="stratStop">
+            <h1 style="display:inline;">Stop Loss: </h1>
+        </div>
+
+    </div>
+</body>
+<script src='javascripts/stratMan.js'></script>
+</html>

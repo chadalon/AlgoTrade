@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <link rel="stylesheet" href="base.css">
+    <link rel="stylesheet" href="dashboard.css">
+    <title>Dashboard</title>
+</head>
+<body>
+    <div class="leftStuff">
+        <h1 id="apiTitle">APIs</h1>
+
+        <div id="krakenDiv">
+            <p>Kraken</p>
+            <ul id="krakenList"></ul>
+            <form id="kForm">
+                <div>
+                    <label>Enter Item</label>
+                    <input type="text" id="kName" placeholder="Name" autofocus>
+                    <input type="text" id="kKey" placeholder="key" autofocus>
+                    <input type="text" id="kSecret" placeholder="secret" autofocus>
+                </div>
+                <button type="submit">add token</button>
+            </form>
+        </div>
+
+        <div id="ameritradeDiv">
+            <p>TD Ameritrade</p>
+            <ul id="ameritradeList"></ul>
+            <form id="tdForm">
+                <div>
+                    <label>Enter Item</label>
+                    <input type="text" id="tdName" placeholder="Name" autofocus>
+                    <input type="text" id="tdKey" placeholder="key" autofocus>
+                    <input type="text" id ="tdRefresh" placeholder="Refresh Token" autofocus>
+                </div>
+                <button type="submit">add key</button>
+            </form>
+        </div>
+        <div id="etradeDiv">
+            <p>eTrade</p>
+            <ul id="etradeList"></ul>
+            <form id="etForm">
+                <div>
+                    <label>Enter Item</label>
+                    <input type="text" id="etName" placeholder="Name" autofocus>
+                    <input type="text" id="etKey" placeholder="key" autofocus>
+                    <input type="text" id="etSecret" placeholder="secret" autofocus>
+                </div>
+                <button type="submit">add token</button>
+                </div>
+            </form>
+        </div>
+
+    </div>
+    <div class="rightStuff">
+        <button id="stratButt">Manage Strategies</button>
+        <button id="liveRun">Run Live</button>
+        <p>By using this software you agree to assume all risk and responsibility of any loss of assets this software may cause.</p>
+    </div>
+</body>
+<script src='javascripts/dashboard.js'></script>
+</html>
