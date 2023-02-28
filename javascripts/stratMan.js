@@ -3,10 +3,14 @@
  * indicators not loading in until shit is changed
  * ask if u wanna save before closing window ?
  * obvsly loading in data
+ * 
+ * MA not working when u load in a strat
+ * load previous state
  */
 
-const styling = require('./javascripts/stratManStylizing.js');
+const styling = require('./javascripts/stratman/stylizing.js');
 const graphElements = require('./javascripts/stratman/graphElements.js');
+const apiStuff = require("./javascripts/stratman/apiStuff.js");
 const fs = require('fs');
 
 const path = require('path');
@@ -352,7 +356,7 @@ function AddIndicator(ind, savedParams = null, doNotWriteFile = false) {
                 type: ind,
                 params: paramtrs
             };
-            newDiv = CreateIndDiv("Moving Average", paramtrs);
+            newDiv = graphElements.CreateIndDiv("Moving Average", paramtrs);
 
             break;
         default:
@@ -378,39 +382,6 @@ function AddIndicator(ind, savedParams = null, doNotWriteFile = false) {
         chartList[i].UpdateIndicatorDat();
     }
     //UpdateIndicatorDivs();
-}
-
-function CreateIndDiv(title, indicatorParams) {
-    var newDiv = document.createElement("div");
-    newDiv.className = "indBox";
-    var divTitle = document.createElement("div");
-    divTitle.className = "indBoxTitle";
-    divTitle.innerHTML = "<p>" + title + "</p>";
-    var indDelButt = document.createElement("div");
-    indDelButt.className = "indDel";
-    indDelButt.innerHTML = "del";
-
-    indDelButt.addEventListener('click', function(e) {
-        DeleteIndicator(newDiv);
-    });
-
-
-    divTitle.appendChild(indDelButt);
-    newDiv.appendChild(divTitle);
-
-    for (const [key, value] of Object.entries(indicatorParams)) {
-        var paramContainerDiv = document.createElement('div');
-        paramContainerDiv.style.width = '100%';
-        let displayAndForm = CreateTextInputForm(newDiv, key, value);
-        paramContainerDiv.innerHTML += "<p>" + key + ": </p>";
-        paramContainerDiv.appendChild(displayAndForm[0]);
-        paramContainerDiv.appendChild(displayAndForm[1]);
-        newDiv.appendChild(paramContainerDiv);
-
-    }
-    
-
-    return newDiv;
 }
 //dont think i will need this 6/4/21
 /*
@@ -489,12 +460,14 @@ function DeleteIndicator(divElement) {
     }
     // aaaand finally
     RemoveIndicatorHTML(divElement);
+    // TODO: UPDATE STRATEGY
 }
 function RemoveIndicatorHTML(divElement) {
     divElement.remove();
 }
 
 // #############################################################################################
+/*
 const getMessageSignature = (path, request, secret, nonce) => {
     const message = qs.stringify(request);
     const secret_buffer = Buffer.from(secret, 'base64');
@@ -508,44 +481,9 @@ const getMessageSignature = (path, request, secret, nonce) => {
 function GetNonce () {
     return Math.floor(+new Date() / 1000);
 }
+*/
 
 // #############################################################################################
-
-const checkBal = document.getElementById('getBal');
-const showBal = document.getElementById('showBal');
-checkBal.addEventListener('click', function() {
-    if (tempStrat.token[0] == 'kraken'){
-        const nonce = GetNonce();
-        axios({
-            method: 'post',
-            url: 'https://api.kraken.com/0/private/Balance',
-            data: qs.stringify({
-                'nonce': nonce
-            }),
-            headers: {
-                'API-Key': tempStrat.token[1].key,
-                'API-Sign': getMessageSignature('/0/private/Balance', {'nonce': nonce}, tempStrat.token[1].secret, nonce),
-                'content-type': 'application/x-www-form-urlencoded;charset=utf-8',
-                'user-agent': 'Node.js app'
-            }
-        })
-        .then((response) => {
-            console.log(response.data);
-            if (response.data.error.length > 0) {
-                showBal.innerHTML = JSON.stringify(response.data.error, null, 2);
-            } else {
-                showBal.innerHTML = JSON.stringify(response.data.result, null, "\t");
-            }
-        })
-        .catch((error) => {
-            alert(error);
-        });
-    }
-    else if (tempStrat.token[0] == 'td') {
-        // TODO: td ameritrade balances
-        console.log('hasnt been coded yet');
-    }
-});
 
 function LoadPairList() {
     /**
@@ -563,7 +501,7 @@ function LoadPairList() {
         let chat = new Chart();
         chat.pair = dat[i];
         //hope to god this works
-        GetTheCandles(dat[i], chartList.length - 1);
+        apiStuff.GetTheCandles(dat[i], chartList.length - 1);
         
     }
 }
@@ -587,12 +525,12 @@ function PairListFinished() {
     pairListResults = [];
 }
 
-
+/*
 function GetTheCandles(pa, chartNum) {
     /**
      * This function connects to the desired api to retrieve history, and formats it to make it universal.
      * TODO: find out how to plug in data
-     */
+     *
     let chartInterval = chartList[chartNum].chartInterval;
     let intervalType = chartInterval.split(" ")[1];
     let intervalNum = parseInt(chartInterval.split(" ")[0]);
@@ -683,6 +621,7 @@ function GetTheCandles(pa, chartNum) {
     }
 
 }
+*/
 
 // couldnt keep this in chart class, idk why???
 function UpdateCharts() {
@@ -690,7 +629,7 @@ function UpdateCharts() {
     for (let i = 0; i < chartList.length; i++)
     {
         if (chartList[i].pair == '') continue;
-        GetTheCandles(chartList[i].pair, i);
+        apiStuff.GetTheCandles(chartList[i].pair, i);
     }
 }
 
