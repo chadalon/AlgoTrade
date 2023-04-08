@@ -9,9 +9,15 @@
  */
 
 const styling = require('./javascripts/stratman/stylizing.js');
+const {Chart, IndicatorIsUpperChart, GetRelevantChartIndex } = require('./javascripts/stratman/Chart.js');
+const { Graph } = require('./javascripts/stratman/Graph.js');
+const LoadFile = require('./javascripts/stratman/LoadFile.js');
 const graphElements = require('./javascripts/stratman/graphElements.js');
 const apiStuff = require("./javascripts/stratman/apiStuff.js");
 const fs = require('fs');
+const csv = require('fast-csv');
+
+const qm = require('./javascripts/stratman/QuickMafs.js');
 
 const path = require('path');
 const electron = require('electron');
@@ -42,6 +48,7 @@ var krakenPairList = [];
 const apiSelector = document.getElementById('apisel');
 const stratSelector = document.getElementById('stratDropdown');
 const shortingElement = document.getElementById('shortingBool');
+const afterHoursElement = document.getElementById('afterHours')
 
 // tempStrat.buyStratBp puts the strat in order
 // [{first, second, etc}, '&&', {first, second, etc}]
@@ -49,9 +56,11 @@ const blankStrat = {
     token: {},
     charts: [{pair: ""},{pair: ""}],
     indicators: [],
+    lindicators: [], // lower indicators
     buyStratBP: [],
     sellStratBP: [],
-    shorting: false
+    shorting: false,
+    noAfterHours: false
 };
 var tempStrat = JSON.parse(JSON.stringify(blankStrat));
 
@@ -97,6 +106,7 @@ ipcRenderer.on('api-data', function(e, data) {
     // Load the token when it starts. from here on out we update tempstrat.token
     // every time the selection changes. (in changetoken())
     tempStrat.token = GetSelectedToken();
+
 });
 
 ipcRenderer.send('give-strat-data');
@@ -121,6 +131,10 @@ shortingElement.addEventListener('change', function(e) {
     ipcRenderer.send('currentStrat:updateFile', tempStrat);
 
 });
+afterHoursElement.addEventListener('change', function(e) {
+    tempStrat.noAfterHours = afterHoursElement.checked;
+    ipcRenderer.send('currentStrat:updateFile', tempStrat);
+});
 
 // but delete it after you change the calls to it and getselected a bgit
 function ChangeToken() {
@@ -129,6 +143,8 @@ function ChangeToken() {
     //Overwrite whole file
     ipcRenderer.send('currentStrat:updateFile', tempStrat);
 }
+
+
 
 // might make changetoken useless
 function GetSelectedToken() {
@@ -140,7 +156,7 @@ function GetSelectedToken() {
     let tokType = className.slice(0,-5);
     for (let tok = 0; tok < apiTokens[tokType].length; tok++) {
         if (tokType + apiTokens[tokType][tok].name == apiSelector.value) {
-            console.log([tokType, apiTokens[tokType][tok]]);
+            //console.log([tokType, apiTokens[tokType][tok]]);
             return [tokType, apiTokens[tokType][tok]];
         }
     }
@@ -228,7 +244,8 @@ function LoadStrategy(stratObj, resetting=false) {
     // set the var
     tempStrat = JSON.parse(JSON.stringify(blankStrat));
     tempStrat.shorting = stratObj.shorting;
-    console.log(stratObj)
+    console.log("Loaded object:");
+    console.log(stratObj);
     //tempStrat.buyStratBP = [];
     //tempStrat.sellStratBP = [];
     
@@ -236,8 +253,15 @@ function LoadStrategy(stratObj, resetting=false) {
     if (!resetting) ipcRenderer.send('currentStrat:updateFile', stratObj);
     // load token
     // This will bring 'krakentokenname' etc
-    if (!resetting) apiSelector.value = stratObj.token[0] + stratObj.token[1].name;
+    
+    if (!resetting) {
+        if (stratObj.token != "none")
+            apiSelector.value = stratObj.token[0] + stratObj.token[1].name;
+        else
+            apiSelector.value = "none";
+    }
     tempStrat.token = GetSelectedToken();
+
 
     // load pair/graph
     // delete first
@@ -245,7 +269,10 @@ function LoadStrategy(stratObj, resetting=false) {
         chartList[i].RemoveHTML();
     }
     numOfCharts = 0;
+    // Chart.js adds its own Chart object when created to this list
     chartList = [];
+    // this seems to work for the file link shit
+    tempStrat.charts = stratObj.charts;
     for (let thing = 0; thing < stratObj.charts.length; thing++) {
         CreateAChart(stratObj.charts[thing]);
     }
@@ -254,16 +281,25 @@ function LoadStrategy(stratObj, resetting=false) {
     for (let thing = 0; thing < indicatorDivList.length; thing++) {
         RemoveIndicatorHTML(indicatorDivList[thing]);
     }
+    //console.log(tempStrat.indic)
     indicatorDivList = [];
     for (let thing = 0; thing < stratObj.indicators.length; thing++) {
         AddIndicator(stratObj.indicators[thing].type, stratObj.indicators[thing].params, true);
     }
+    // now we add the indicators to tempstrat (does it matter if we put this above last funcs?)
+    tempStrat.indicators = stratObj.indicators;
     
     //TODO: save window scroll/zoom
 
     // Load bottom strategy
     shortingElement.checked = tempStrat.shorting;
     // generate strats
+    // TODO generatelowerstrategy adds strategies to tempstrat.
+    // I feel like it should already be added. or maybe not.
+    // it's just messy to be setting it for some things (like indicator lists)
+    // and not for things like the strategy.
+    tempStrat.buyStratBP = stratObj.buyStratBP;
+    tempStrat.sellStratBP = stratObj.sellStratBP;
     GenerateLowerStrategy(stratObj.buyStratBP, stratObj.sellStratBP, true);
 }
 
@@ -337,13 +373,15 @@ ipcRenderer.on('alert', function(e, msg) {
 
 function AddIndicator(ind, savedParams = null, doNotWriteFile = false) {
     console.log(ind);
+    let lowerIndicator = false;
     var newDiv;
-    let indicator;
     var container = document.getElementById("indicatorList");
     var indButton = document.getElementById("adder");
+    let paramtrs = savedParams; // each case will default to saved params unless they aint saved
+    let indicator = {type: ind} // i think if we change paramtrs after this it will change here...
+    let divString;
     switch (ind) {
         case 'MA':
-            let paramtrs = savedParams;
             if (!savedParams) {
                 let defaultPeriod = 5;
                 paramtrs = {
@@ -352,26 +390,60 @@ function AddIndicator(ind, savedParams = null, doNotWriteFile = false) {
                 };
 
             }
+            divString = "Moving Average";
+            /*
             indicator = {
                 type: ind,
                 params: paramtrs
-            };
-            newDiv = graphElements.CreateIndDiv("Moving Average", paramtrs);
+            };*/
 
+            break;
+        case 'BOL':
+            if (!savedParams) {
+                let defaultPeriod = 20;
+                let defaultSTDs = 2;
+                paramtrs = {
+                    period: defaultPeriod,
+                    m: defaultSTDs,
+                    color: '#000000'
+                }
+            }
+            divString = "Bollinger Bands";
+            break;
+        lowerIndicator = true;
+        //##############################Lower chart##############################
+        case 'VOL':
+            // check if vol exists already
+            for (let j = 0; j < tempStrat.indicators.length; j++)
+            {
+                if (tempStrat.indicators[j].type == "VOL") return;
+            }
+            if (!savedParams)
+            {
+                paramtrs = {
+                    color: "Red"
+                }
+            }
+            divString = "Volume";
             break;
         default:
             break;
     }
+    // dbl check this
+    indicator.params = paramtrs;
+    newDiv = graphElements.CreateIndDiv(divString, paramtrs);
+
     container.insertBefore(newDiv, indButton);
     indicatorDivList.push(newDiv);
     if (!doNotWriteFile) { // As of rn, this means we just clicked the button to add indicator (not loading)
         //THIS IS THE FUCKING CULPRIT DGODDAMNNN
         tempStrat.indicators.push(indicator);
+        
         ipcRenderer.send('currentStrat:updateFile', tempStrat);
 
         // and now update the lower strat. I technically could go in and just add to each div's
         // individual select element, but fuck that. just reset whole thing
-        GenerateLowerStrategy(tempStrat.buyStratBP, tempStrat.sellStratBP);
+        GenerateLowerStrategy(tempStrat.buyStratBP, tempStrat.sellStratBP, true); //ERROR FIXME
 
     }
 
@@ -379,7 +451,7 @@ function AddIndicator(ind, savedParams = null, doNotWriteFile = false) {
     // if chart exists, update indicators
     for (let i = 0; i < chartList.length; i++) {
         if (chartList[i].parsedDat.length == 0) continue;
-        chartList[i].UpdateIndicatorDat();
+        chartList[i].UpdateIndicatorDat(tempStrat.indicators.length - 1);
     }
     //UpdateIndicatorDivs();
 }
@@ -431,6 +503,11 @@ function CreateTextInputForm(containr, paramName, defaultVal) {
             if (chartList[i].parsedDat.length == 0) continue;
             chartList[i].UpdateIndicatorDat(indicatorDivList.indexOf(containr));
         }
+        // bro i'm just adding shit everywhere
+        if (paramName == "period") // this is supposed to make it so strat var divs update from like MA12 to MA15
+        {
+            GenerateLowerStrategy(tempStrat.buyStratBP, tempStrat.sellStratBP, true);
+        }
     });
 
     displayDat.addEventListener('click', function(e) {
@@ -446,6 +523,22 @@ function CreateTextInputForm(containr, paramName, defaultVal) {
 }
 function DeleteIndicator(divElement) {
     let tmpIndex = indicatorDivList.indexOf(divElement);
+
+    //calculations for removing from chart classes
+    let isUpper = IndicatorIsUpperChart(tempStrat.indicators[tmpIndex].type);
+    let indChartIndex = GetRelevantChartIndex(tmpIndex);
+    // we're gonna pass in [isupperchart, index]
+    if (isUpper)
+    {
+        indChartIndex = [true, indChartIndex];
+    }
+    else
+    {
+        indChartIndex = [false, indChartIndex];
+    }
+    console.log(indChartIndex);
+
+
     // remove from tempstrat
     tempStrat.indicators.splice(tmpIndex, 1);
     // remove from list that gives index
@@ -456,11 +549,17 @@ function DeleteIndicator(divElement) {
     // remove the calculated data list from chart
     for (let i = 0; i < chartList.length; i++) {
         if (chartList[i].parsedDat.length == 0) continue;
-        chartList[i].UpdateIndicatorDat(tmpIndex, true);
+        chartList[i].UpdateIndicatorDat(tmpIndex, indChartIndex);
     }
     // aaaand finally
     RemoveIndicatorHTML(divElement);
-    // TODO: UPDATE STRATEGY
+    // UPDATE STRATEGY
+        
+    ipcRenderer.send('currentStrat:updateFile', tempStrat);
+
+    // and now update the lower strat. I technically could go in and just add to each div's
+    // individual select element, but fuck that. just reset whole thing
+    GenerateLowerStrategy(tempStrat.buyStratBP, tempStrat.sellStratBP, true); //ERROR FIXME
 }
 function RemoveIndicatorHTML(divElement) {
     divElement.remove();
@@ -525,103 +624,7 @@ function PairListFinished() {
     pairListResults = [];
 }
 
-/*
-function GetTheCandles(pa, chartNum) {
-    /**
-     * This function connects to the desired api to retrieve history, and formats it to make it universal.
-     * TODO: find out how to plug in data
-     *
-    let chartInterval = chartList[chartNum].chartInterval;
-    let intervalType = chartInterval.split(" ")[1];
-    let intervalNum = parseInt(chartInterval.split(" ")[0]);
-    var graph = {
-        chartNumber: chartNum,
-        element: document.getElementById('graph' + chartNum),
-        topPadding: 10,
-        botPadding: 40
-    }
-
-    if (intervalType == 'hours') {
-        intervalNum *= 60;
-        intervalType = 'minute';
-    }
-    if (tempStrat.token[0] == 'kraken') {
-        
-        console.log(intervalNum);
-        const nonce = GetNonce();
-        if (pa == null) return;
-        request = {
-            'nonce': nonce,
-            'pair': pa
-        }
-        
-        axios({
-            method: 'post',
-            url: 'https://api.kraken.com/0/public/OHLC',
-            data: qs.stringify({
-                'nonce': nonce,
-                'pair': pa,
-                'interval': intervalNum
-            }),
-            headers: {
-                'API-Key': tempStrat.token[1].key,
-                'API-Sign': getMessageSignature('/0/public/OHLC', {
-                    'nonce': nonce,
-                    'pair': pa,
-                    'interval': intervalNum
-                }, tempStrat.token[1].secret, nonce),
-                'content-type': 'application/x-www-form-urlencoded;charset=utf-8',
-                'user-agent': 'Node.js app'
-
-            }
-        })
-        .then((response) => {
-            res = response.data.result;
-            console.log(response.data);
-            chartList[chartNum].InitData('kraken', graph, Object.values(res)[0]);
-        })
-        .catch((error) => {
-            console.log(error);
-            alert(error);
-        });
-    }
-    else if (tempStrat.token[0] == 'td') {
-
-        //TODO: clean up. idk if this is the best way bc i forgot how async/promises/blocks or whateverthefuck work
-        const getDat = () => {
-            try {
-                return axios.get(`https://api.tdameritrade.com/v1/marketdata/${pa}/pricehistory`, {
-                    params: {
-                        apikey: tempStrat.token[1].key, // I just guessed here
-                        periodType: 'day',
-                        period: '3',
-                        frequencyType: intervalType,
-                        frequency: intervalNum,
-                        endDate: Date.now()
-                    }
-                })
-            } catch (error) {
-                console.error(error);
-                alert(error);
-            }
-        }
-        const getItMasteria = async () => {
-            const thedat = getDat()
-            .then(response => {
-                console.log(response.data);
-                let res = response.data.candles;
-                chartList[chartNum].InitData('td', graph, res);
-            })
-            .catch(error => {
-                console.log(error);
-                alert(error);
-            })
-        }
-        getItMasteria()
-    }
-
-}
-*/
+// GetTheCandles used to b here
 
 // couldnt keep this in chart class, idk why???
 function UpdateCharts() {
@@ -633,1085 +636,9 @@ function UpdateCharts() {
     }
 }
 
-/// exchange: string; the exchange name
-/// graph: object for the graph this is connected to
-/// there can be multiple charts
-/// backtestData: all the data we pulled
-class Chart {
-    constructor(params = null/*exchange, graphdat, backtestData*/) {
-        //TODO: make sure this works
-        if (params && params.hasOwnProperty('chartInterval')) {
-            this.chartInterval = params[chartInterval];
-        } else {
-            this.chartInterval = '30 minute';
-        }
-        // if we start buying or selling
-        this.startWithBuy = true;
-        // can't trade after hours
-        this.noAfterHours = true;
-        this.canvasWidth = 800;
-        // boughtIndexes are indexes we placed a buy. right now only supports one item in list
-        this.boughtIndexes = [];
-        // starting cash
-        this.startingCash = 1000;
-        this.tradingStock = 0;
-        this.parsedDat = [];
-        this.chartIndex = chartList.length;
-        
-        // used for updating strat buy/sell lists to know what index we on in other fnctns
-        this.stratIndex = 0;
-        this.buyIndexList = [];
-        chartList.push(this);
+// Chart class used to be here
 
-        // this gets called externally only now
-        //this.InitData(exchange, graphdat, backtestData);
-        if (drawingStrat)
-            this.InitElements(params);
-
-        
-        this.myGraph = null;
-    }
-    InitElements(params) {
-        let myIndex = chartList.length - 1;
-        if (params == null) {
-            /*
-            tempStrat.charts.push({
-                pair: ''
-            });*/
-            this.pair = '';
-        } else {
-            this.pair = tempStrat.charts[myIndex].pair;
-        }
-        //BRO USE CSS GRID FOR MAINCONTAIN
-        //let maincontain = document.getElementById('chartStuff');
-        this.maincontain = document.createElement('div');
-        this.maincontain.id = 'chartStuff' + myIndex;
-        /// Create Pair form
-            //div autocomplete
-                // input text
-            //input submit
-        // h1 show pair
-    
-        /// canvas
-    
-        /// div lowercontrols
-            // dropdown period
-        //sliders
-    
-        let pForm = document.createElement('form');
-        pForm.autocomplete = 'off';
-        pForm.id = 'pairForm' + myIndex;
-    
-        let aComp = document.createElement('div');
-        aComp.className = 'autocomplete';
-        let pSelect = document.createElement('input');
-        pSelect.className = 'txtInput';
-        pSelect.id = 'pairSelect' + myIndex;
-        pSelect.type = 'text';
-        pSelect.name = pSelect.id;
-        pSelect.placeholder = 'Select Pair';
-        if (params != null) {
-            pSelect.value = params.pair;
-        }
-        aComp.appendChild(pSelect);
-        pForm.appendChild(aComp);
-    
-        let pSubmit = document.createElement('input');
-        pSubmit.type = 'submit';
-        pSubmit.className = 'txtInput pairSubmit';
-        pForm.appendChild(pSubmit);
-        this.maincontain.appendChild(pForm);
-    
-        let showPear = document.createElement('h1');
-        showPear.id = 'showPair' + myIndex;
-        showPear.style.display = 'none';
-        this.maincontain.appendChild(showPear);
-    
-        //canv
-        // TODO: calculate width and height based on current myIndex
-        let theCanvas = document.createElement('canvas');
-        theCanvas.innerHTML = 'not loading';
-        theCanvas.id = 'graph' + myIndex;
-        theCanvas.className = 'graph';
-        theCanvas.width = this.canvasWidth.toString();
-        theCanvas.height = '400';
-        this.maincontain.appendChild(theCanvas);
-        
-        let lowChartCont = document.createElement('div');
-        lowChartCont.id = 'lowerChartControls' + myIndex;
-
-        let iselectLabel = document.createElement('label');
-        iselectLabel.for = 'intervalSelector' + myIndex;
-        iselectLabel.innerHTML = 'Interval: ';
-        let islect = this.InitIntervalSelector();
-        islect.name = 'intervalSelector' + myIndex;
-        islect.id = 'interSelector' + myIndex;
-
-        lowChartCont.appendChild(iselectLabel);
-        lowChartCont.appendChild(islect);
-        this.maincontain.appendChild(lowChartCont);
-    
-        let sliderCntn = document.createElement('div');
-        sliderCntn.id = 'sliderContainer' + myIndex;
-        
-        this.maincontain.appendChild(sliderCntn);
-        document.getElementById('rightSide').appendChild(this.maincontain);
-
-        this.chartInterval = islect.value;
-    
-        // Event Listeners
-        pForm.addEventListener('submit', function(e) {
-            e.preventDefault();
-            // TODO: td ameritrade; other api functionality
-            let pair = pSelect.value;
-            if (tempStrat.token[0] == 'kraken' && !krakenPairList.includes(pair.toUpperCase())) {
-                alert('bitch sit down');
-                return;
-            }
-            tempStrat.charts[myIndex].pair = pair;
-            chartList[myIndex].pair = pair;
-            ipcRenderer.send('currentStrat:updateFile', tempStrat);
-            showPear.innerHTML = pair;
-            pForm.style.display = 'none';
-            showPear.style.display = 'block';
-            pSelect.value = '';
-            UpdateCharts();
-    
-        });
-        showPear.addEventListener('click', function(e) {
-            pSelect.value = showPear.innerHTML;
-            showPear.style.display = 'none';
-            pForm.style.display = 'block';
-            pSelect.select();
-            showPear.innerHTML = '';
-        });
-        islect.addEventListener('change', function(e) {
-            e.preventDefault();
-            chartList[myIndex].chartInterval = islect.value;
-            UpdateCharts();
-        });
-    
-        // Other
-        styling.autocomplete(pSelect, krakenPairList);
-
-    }
-    InitIntervalSelector() {
-        let islect = document.createElement('select');
-        let optn = document.createElement('option');
-        optn.value = '5 minute';
-        optn.innerHTML = '5 min';
-        islect.appendChild(optn);
-        optn = document.createElement('option');
-        optn.value = '30 minute';
-        optn.innerHTML = '30 min';
-        islect.appendChild(optn);
-        optn = document.createElement('option');
-        optn.value = '1 hour';
-        optn.innerHTML = '1 hour';
-        islect.appendChild(optn);
-        optn = document.createElement('option');
-        optn.value = '6 hour';
-        optn.innerHTML = '6 hour';
-        islect.appendChild(optn);
-        
-        islect.value = '30 minute';
-        return islect;
-    }
-
-    /// We call this when new data is loaded
-    InitData(exchange, graphdat, backtestData) {
-        // 'kraken', etc
-        this.apiType = exchange;
-        this.graphDat = graphdat;
-        // this is what the list will look like
-        [{'timestamp':5854239, 'open': "0.004", 'etc': 'ya'}]
-        this.parsedDat = [];
-        //add color data here
-        this.upperChartIndicatorData = [];
-
-        /// goes thru each candlestick and
-        /// turns it into readable data.
-        /// this method will be used for each
-        /// exchange, and the resulting data
-        /// will be in the same format across
-        /// each one.
-        if (this.apiType == 'kraken')
-        {
-            this.noAfterHours = false;
-            for (let p = 0; p < backtestData.length; p++)
-            {
-                // change this later if need be
-                var cStick = {
-                    'timestamp': backtestData[p][0],
-                    'open': parseFloat(backtestData[p][1]),
-                    'high':parseFloat(backtestData[p][2]),
-                    'low':parseFloat(backtestData[p][3]),
-                    'close':parseFloat(backtestData[p][4]),
-                    'volume':parseFloat(backtestData[p][6]),
-                    'trades':parseFloat(backtestData[p][7])
-                };
-                this.parsedDat.push(cStick);
-            }
-        }
-        if (this.apiType == 'td') {
-            for (let candle = 0; candle < backtestData.length; candle++)
-            {
-                let dat = backtestData[candle];
-                // change this later if need be
-                // TODO: make sure timestamps are in same units!!
-                var cStick = {
-                    'timestamp': dat.datetime / 1000,
-                    'open': dat.open,
-                    'high': dat.high,
-                    'low': dat.low,
-                    'close': dat.close,
-                    'volume': dat.volume,
-                    'trades': null
-                };
-                this.parsedDat.push(cStick);
-            }
-        }//else if apitype....
-
-        // TODO: maybe in the future allow the zoom to be bigger than dataset
-        let zom = 25;
-        if (this.parsedDat.length <= zom) {
-            zom = this.parsedDat.length - 1;
-        }
-
-        this.MegaLoop();
-
-        //why is lastIndex even a thing?? fuckin banish that shit
-        // TODO: use timestamp to determine position based from last
-        
-        this.dynChartWindowData = {
-            // how many indexes can we fit
-            // TODO: change to a zoom scale so we can fit half csticks on edge
-            zoom:zom,
-            shift:0,
-            lastIndex:this.parsedDat.length - 1
-        };
-
-
-        if (tempStrat.indicators.length > 0) {
-            this.UpdateIndicatorDat();
-        }
-        this.UpdateStratDat();
-        
-        
-        // this will happen twice if updateindicatordat is called, oh well
-        if (this.myGraph && drawingStrat) {
-            this.myGraph.CalibrateSliders();
-            this.myGraph.DrawChart();
-        } else {
-            if (drawingStrat)
-                this.myGraph = new Graph(this);
-        }
-        // if we're last in the list (if we are running through one), finish it up.
-        // had to take this out of updatestratdat bc it will update drawingstrat var, etc
-        // has to be at end of code
-        if (runningList) {
-            if (pairListSize == pairListResults.length) {
-                // we finished list of pairs
-                console.log('finished,',pairListSize);
-                PairListFinished();
-            }
-        }
-    }
-    MegaLoop() {
-        /**
-         * This loop is called anytime we get new parsedData generated.
-         * It adds any bells and whistle data for the chart 
-         */
-        let newDays = [];
-        let lastTimestamp = 0;
-        let lastDate;
-        let curDate;
-
-        //pre post market
-        let afterHoursDat = [];
-        let dayt;
-        let intervalType = this.chartInterval.split(" ")[1];
-        let intervalNum = parseInt(this.chartInterval.split(" ")[0]);
-        let timeOfDay;
-        switch (intervalType) {
-            case 'minute':
-                this.secondsPerCandle = 60 * intervalNum;
-                break;
-            case 'hour':
-                this.secondsPerCandle = 3600 * intervalNum;
-                break;
-        }
-        let timeInSecs;
-        for (let item = 0; item < this.parsedDat.length; item++) {
-            // First we calculate new days.
-            if (lastTimestamp == 0) {
-                lastTimestamp = this.parsedDat[item].timestamp;
-                newDays.push(false);
-            }
-            else {
-                lastDate = new Date(lastTimestamp * 1000);
-                curDate = new Date(this.parsedDat[item].timestamp * 1000);
-                // date.getDate() gives the day https://stackoverflow.com/questions/10535782/how-can-i-convert-a-date-in-epoch-to-y-m-d-his-in-javascript
-                // TODO: intervals >= 1 day will have a dateline for every candle lmao
-                if (lastDate.getDate() != curDate.getDate()) {
-                    // new day. Draw line before current candle
-                    newDays.push(true);
-                }
-                else {
-                    newDays.push(false);
-                }
-                lastTimestamp = this.parsedDat[item].timestamp;
-            }
-
-
-            // pre and post market data
-            if (this.chartInterval.includes('minute') || this.chartInterval.includes('hour')) {
-                /*
-                    1 hr = 3600 sec
-                    idk what this will do on holidays and unusual opening/closing times
-                */
-               
-                dayt = new Date(this.parsedDat[item].timestamp * 1000);
-                let timeStringList = dayt.toLocaleString('en-US', {timeZone: 'America/New_York'}).split(", ")[1].split(" ");
-                
-                timeInSecs = parseInt(timeStringList[0][0]) * 60 * 60;
-                timeInSecs += parseInt(timeStringList[0].split(':')[1]) * 60;
-                // if the date ends on or after market opens, add data
-                // if the date ends on or after market closes, add data
-                // data is ['pre', dataforwhentostart]
-                // or ['post', dataforwhentoend]
-                //premarket
-                // 9:30 in secs is 34200
-                if (timeStringList[1] == 'AM' && (timeInSecs == 34200 || timeInSecs < 34200 && timeInSecs + this.secondsPerCandle > 34200)) {
-                    afterHoursDat.push(['pre', 34200 - timeInSecs]);
-                    timeOfDay = 'during';
-                }
-                // 4:00 in secs 14400
-                else if (timeStringList[1] == 'PM' && (timeInSecs == 14400 || timeInSecs < 14400 && timeInSecs + this.secondsPerCandle > 14400)) {
-                    afterHoursDat.push(['post', 14400 - timeInSecs]);
-                    timeOfDay = 'after';
-                }
-                else if (item == 0) {
-                    // if we're in first one, check if in daytime or afterhours
-                    if (timeStringList[1] == 'AM' && timeInSecs < 34200 || timeStringList[1] == 'PM' && timeInSecs > 14400) {
-                        timeOfDay = 'after';
-                    }
-                    else {
-                        timeOfDay = 'during';
-                    }
-                    afterHoursDat.push(timeOfDay);
-                }
-                else {
-                    afterHoursDat.push(timeOfDay);
-                }
-
-            }
-
-        }
-        console.log(afterHoursDat);
-
-        // Apply the data
-        this.upperChartMiscData = {
-            dateLines: newDays,
-            afterHours: afterHoursDat
-        };
-
-    }
-    // ohlc determines whether we compare opens, highs, lows, closes
-    EvalObj(obj) {
-        let x;
-        if (obj.hasOwnProperty('logic'))
-            x = EvalBools(this.EvalObj(obj.firstExpression), this.EvalObj(obj.secondExpression), obj.logic);
-        else {
-            //TODO: test this.
-            //if one of the indicators hasn't been calculated accurately yet, return false.
-            // by this i mean if like you have price from 2 indexes ago but we're on the first
-            // one, we literally can't do anything
-            if (obj.first.params.hasOwnProperty('index') && obj.first.params.index > this.stratIndex) return false;
-            if (obj.second.params.hasOwnProperty('index') && obj.second.params.index > this.stratIndex) return false;
-
-            let firstval = this.GetVarValue(obj.first);
-            let secondval = this.GetVarValue(obj.second);
-
-            // math var has index out of range
-            if (firstval == 'no' || secondval == 'no') return false;
-
-            x = EvalVars(firstval, secondval, obj.compareOp);
-        }
-        if (obj.notted)
-            x = !x;
-        return x;
-    }
-    GetVarValue(obj) {
-        /**
-         * housekeeping
-         */
-        switch (obj.type) {
-            case 'math':
-                return this.EvalMathObject(obj.params.mathObject);
-            case 'constant':
-                return obj.params.value;
-            case 'price':
-                return this.parsedDat[this.stratIndex - obj.params.index][obj.params.ohlc];
-            case 'buy-price':
-                if (this.boughtIndexes.length == 0) return 'no';
-                // TODO: should we just keep the close here?
-                return this.parsedDat[this.boughtIndexes[obj.params.buyIndex]].close;
-            case 'time-of-day':
-                // returns minutes since day started
-                let tim = new Date(this.parsedDat[this.stratIndex].timestamp * 1000);
-                tim = tim.toLocaleString('en-US', {timeZone: 'America/New_York'}).split(", ")[1].split(" ");
-                let clocktime = tim[0].split(':');
-                if (clocktime[0] == '12')
-                    clocktime[0] = '0';
-                let timeInMins = parseInt(clocktime[0]) * 60 + parseInt(clocktime[1]);
-                if (tim[1] == 'PM')
-                    timeInMins += 12 * 60;
-                if (obj.params.units == 'hours')
-                    timeInMins /= 60;
-                return timeInMins;
-
-        }
-
-    }
-    EvalMathObject(obj) {
-        let x;
-        // if it hasownproperty params, we in final obj and return 
-        if (obj.hasOwnProperty('operator')) {
-            return EvalMath(this.EvalMathObject(obj.firstOperand), this.EvalMathObject(obj.secondOperand), obj.operator);
-        }
-        else {
-            // tell other functions we out of range
-            if (obj.params.hasOwnProperty('index') && obj.params.index > this.stratIndex) return 'no';
-            // basically copy evalobj
-            return this.GetVarValue(obj);
-        }
-    }
-
-    UpdateStratDat() {
-        /**
-         * Whenever strategy or chart is modified I think this is called.
-         * Recalculates buy data for chart (list for when a buy has happened),
-         * then redraws chart.
-         * returns optional data (for list testing)
-         */
-        if (this.startWithBuy) {
-            this.tradingCash = this.startingCash;
-            this.tradingStock = 0;
-            // this will be fun to figure out if startwithbuy==false
-            this.boughtIndexes = [];
-        }
-
-        let calcbuy = tempStrat.buyStratBP.length > 0;
-        let calcsell = tempStrat.sellStratBP.length > 0;
-        // Parse math blueprints first
-        AddMathObjects();
-        console.log('buystratbp:', tempStrat.buyStratBP);
-        console.log('sellstratbp:', tempStrat.sellStratBP);
-
-        this.buyIndexList = [];
-        this.sellIndexList = [];
-        // parse blueprint here and when a var change is submitted
-        buyStratComparisons = ParseStratBlueprint(tempStrat.buyStratBP);
-        sellStratComparisons = ParseStratBlueprint(tempStrat.sellStratBP);
-
-        console.log('buystratcomp');
-        console.log(buyStratComparisons);
-
-        if (calcbuy || calcsell) {
-            let buying = this.startWithBuy;
-            let valToAdd;
-            for (this.stratIndex = 0; this.stratIndex < this.parsedDat.length; this.stratIndex++) {
-                // if we can't trade outside market hours, check if we are in or outside market hours
-                if (this.noAfterHours) {
-                    //TODO: make sure it will still calculate data inside after hours
-                    // the second part of this OR is if starting time is less than 5 minutes within market close/start
-                    // TODO: change open to last part of candle instead of beginning - try buying at 9:30 and selling at 4, buy is messed up
-                    if (this.upperChartMiscData.afterHours[this.stratIndex] != 'after') {
-                        console.log(this.upperChartMiscData.afterHours[this.stratIndex]);
-                    }
-                    // if it's after market, or if it's ending on the candle and time is < 5 minutes that's after, if more we can buy on open. (or just skip)
-                    // or if it's pre market, if time is 0 we good but if it's longer we can buy the close (in other words skip)
-                    // SCRATCH THAT ABOVE, if candle is in between afterhours it's fucked
-                    if (this.upperChartMiscData.afterHours[this.stratIndex] == 'after' || Array.isArray(this.upperChartMiscData.afterHours[this.stratIndex]) && !(this.upperChartMiscData.afterHours[this.stratIndex][0] == 'pre' && this.upperChartMiscData.afterHours[this.stratIndex][1] < 1)) {// this.upperChartMiscData.afterHours[this.stratIndex][0] == 'post' && this.upperChartMiscData.afterHours[this.stratIndex][1] < 5) {
-                        if (calcbuy)
-                            this.buyIndexList.push(false);
-                        if (calcsell)
-                            this.sellIndexList.push(false);
-                        continue;
-                    }
-                    else if (Array.isArray(this.upperChartMiscData.afterHours[this.stratIndex])) {
-                        // TODO: calculate avg number or something?
-                        // also shit would depend on if ur using close or open or high or low on price
-                        // for now i'm just gonna let it use candle regularly
-
-                    }
-                }
-                if (calcbuy) {
-                    valToAdd = buying && this.EvalObj(buyStratComparisons);
-                    this.buyIndexList.push(valToAdd);
-                    // we cant b allowed to sell and buy on the same index
-                    if (valToAdd) {
-                        console.log('buyin', this.tradingCash);
-                        this.boughtIndexes.push(this.stratIndex);
-                        buying = false;
-                        if (calcsell)
-                            this.sellIndexList.push(false);
-                        this.OnBuyOrSell(true);
-                        continue;
-                    }
-                }
-                if (calcsell) {
-                    valToAdd = !buying && this.EvalObj(sellStratComparisons);
-                    this.sellIndexList.push(valToAdd);
-                    if (valToAdd) {
-                        this.boughtIndexes = [];
-                        buying = true;
-                        this.OnBuyOrSell(false);
-                    }
-                }
-            }
-            this.stratResults = {
-                pair: this.pair,
-                finalValue: this.tradingCash + this.tradingStock * this.parsedDat[this.parsedDat.length - 1].close
-            };
-            if (runningList) {
-                pairListResults.push(this.stratResults);
-            }
-            console.log('Ending money:', this.tradingCash);
-            console.log('Ending stock:', this.tradingStock);
-        }
-
-        // Update graphics
-        if (this.myGraph && drawingStrat) 
-            this.myGraph.DrawChart();
-    }
-    OnBuyOrSell(buy, percentageToUse=1) {
-        // TODO: am i calculating this right? should we buy on next candle or what?
-        // also resetting values to 0 is not accurate at ALL bro
-        // look at ur old trading project to calculate accurately
-        // if you change close here, change it in getvarvalue buy-price
-        let stockPrice = this.parsedDat[this.stratIndex].close;
-        switch (tempStrat.token[0]) {
-            case 'kraken':
-                if (buy) {
-                    this.tradingStock += this.tradingCash * percentageToUse / stockPrice;
-                    this.tradingCash -= this.tradingCash * percentageToUse;
-                }
-                else {
-                    this.tradingCash += this.tradingStock * stockPrice;
-                    this.tradingStock = 0;
-                }
-                break;
-            default:
-                if (buy) {
-                    if (this.tradingCash * percentageToUse < this.tradingStock) {
-                        // TODO: add margin trading capabilities
-                        console.log('NOT ENOUGH FUNDS');
-                        return;
-                    }
-                    let stockQuant = Math.floor(this.tradingCash * percentageToUse / stockPrice);
-                    this.tradingStock += stockQuant;
-                    this.tradingCash -= stockQuant * stockPrice;
-                    console.log('tradingStock:',this.tradingStock);
-                    if (this.tradingCash < 0) alert('tradingCash negative', this.tradingCash, 'index', this.stratIndex);
-                }
-                else {
-                    this.tradingCash += this.tradingStock * stockPrice;
-                    this.tradingStock = 0;
-                    console.log('tradingCash:',this.tradingCash);
-                }
-                break;
-        }
-    }
-
-    // Optional param: if you supply the index it will do that one instead of all of them
-    /// TODO: add lowerchartindicatordata
-    UpdateIndicatorDat(indx = null, removing = false) {
-        if (indx != null) {
-            if (removing) {
-                this.upperChartIndicatorData.splice(indx, 1);
-            } else {
-                this.UIDStuff(indx);
-            }
-        } else {
-            for (let indi = 0; indi < tempStrat.indicators.length; indi++) {
-                this.UIDStuff(indi);
-            }
-        }
-        // if myGraph is already drawn, we need to update it
-        if (this.myGraph && drawingStrat) {
-            this.myGraph.DrawChart();
-        }
-    }
-    UIDStuff(index) {
-        /**
-         * Iterates through parsed data, calculating indicator values
-         */
-        let finishedList = [];
-        switch (tempStrat.indicators[index].type) {
-            case 'MA':
-                let tempDatList = [];
-                let periodList = [];
-                for (let p = 0; p < this.parsedDat.length; p++) {
-                    // TODO: if you want to edit whether it uses open v close etc add here
-                    periodList.push(this.parsedDat[p].close);
-                    if (periodList.length == tempStrat.indicators[index].params.period) {
-                        tempDatList.push(periodList.reduce((a, b) => a + b, 0) / periodList.length);
-                        // remove first item
-                        periodList.shift();
-                    } else {
-                        tempDatList.push(null);
-                    }
-                }
-                finishedList = tempDatList;
-
-                break;
-            default:
-                break;
-        }
-        // i think index will always be included or one after the last in upperchartinddat
-        this.upperChartIndicatorData[index] = finishedList;
-    }
-    /// from current viewable sticks
-    // TODO: include upperchartindicator values in high and low
-    GetHighAndLow() {
-        let firstInd = this.dynChartWindowData.lastIndex - this.dynChartWindowData.zoom;
-        let h = this.parsedDat[firstInd].high;
-        let l = this.parsedDat[firstInd].low;
-        let curHigh = 0;
-        let curLow = 0;
-        for (var i = firstInd; i <= this.dynChartWindowData.lastIndex; i++) {
-            curHigh = this.parsedDat[i].high;
-            curLow = this.parsedDat[i].low;
-            if (curHigh > h) h = curHigh;
-            if (curLow < l) l = curLow;
-        }
-        return [h, l];
-    }
-    Delete() {
-        this.RemoveHTML();
-        // remove from list, trigger index change
-
-    }
-    RemoveHTML() {
-        this.maincontain.remove();
-    }
-}
-
-class Graph {
-    constructor(linktChart) {
-        //linktChart is a chart class instance
-        this.linkedChart = linktChart;
-        this.canv = this.linkedChart.graphDat.element;
-        this.graphDat = this.linkedChart.graphDat;
-        //this.dynWinDat = this.linkedChart.dynChartWindowData;
-        this.options = {
-            prices: true
-        }
-
-        if (drawingStrat)
-            this.DrawChart();
-        
-
-        this.slider = document.createElement('input');
-        this.slider.type = 'range';
-        this.slider.className = "slider";
-        document.getElementById("sliderContainer" + this.graphDat.chartNumber).appendChild(this.slider);
-
-
-        this.scroller = document.createElement('input');
-        this.scroller.type = 'range';
-        this.scroller.className = "slider";
-        document.getElementById("sliderContainer" + this.graphDat.chartNumber).appendChild(this.scroller);
-
-        this.CalibrateSliders();
-
-        this.slider.oninput = function() {
-            //let cnum = chartList.indexOf(linktChart);
-            if (this.value != linktChart.dynChartWindowData.zoom && drawingStrat) {
-                linktChart.dynChartWindowData.zoom = this.value;
-                var firstind = linktChart.dynChartWindowData.lastIndex - linktChart.dynChartWindowData.zoom;
-                if (firstind < 0)
-                {
-                    linktChart.dynChartWindowData.lastIndex -= firstind;
-                } else {
-                    linktChart.myGraph.scroller.max = 0;
-                }
-                linktChart.myGraph.scroller.min = 0 - (linktChart.parsedDat.length - 1 - linktChart.dynChartWindowData.zoom);
-                linktChart.myGraph.DrawChart();
-            }
-        }
-
-        this.scroller.oninput = function() {
-            if (Math.round(this.value) == linktChart.dynChartWindowData.shift || !drawingStrat) return;
-            linktChart.dynChartWindowData.shift = Math.round(this.value);
-            linktChart.dynChartWindowData.lastIndex = linktChart.parsedDat.length - 1 + Math.round(this.value);
-            linktChart.myGraph.DrawChart();
-        }
-    }
-    CalibrateSliders() {
-        /**
-         * 
-         */
-        //first zoom slider
-
-        this.slider.min = 0;
-        this.slider.max = this.linkedChart.parsedDat.length - 1;
-        console.log('data length:' + this.linkedChart.parsedDat.length - 1)
-        this.slider.value = this.linkedChart.dynChartWindowData.zoom;
-        // then scroller
-        this.scroller.min = 0 - (this.linkedChart.dynChartWindowData.lastIndex - this.linkedChart.dynChartWindowData.zoom);
-        this.scroller.max = 0;
-        this.scroller.value = 0;
-
-    }
-    ComputeWidth() {
-        this.availableWidth = this.canv.width;
-        this.startingXPos = 0;
-        this.endingXPadding = 0;
-        if (this.options.prices) {
-            this.endingXPadding += 60;
-        }
-        this.availableWidth -= (this.startingXPos + this.endingXPadding);
-    }
-    DrawChart() {
-        var firstInd = this.linkedChart.dynChartWindowData.lastIndex - this.linkedChart.dynChartWindowData.zoom;
-        var hl = this.linkedChart.GetHighAndLow();
-        this.high = hl[0];
-        this.low = hl[1];
-
-        var availableSpace = this.canv.height - (this.graphDat.botPadding + this.graphDat.topPadding);
-        this.scale = availableSpace / (this.high - this.low);
-        // TODO: possible optimization: only call computewidth when needed
-        this.ComputeWidth();
-        this.indexlength = this.linkedChart.dynChartWindowData.lastIndex - firstInd + 1;
-        this.xscale = this.availableWidth / this.indexlength;
-        this.indexCount = 0;
-
-
-        if (this.canv.getContext) {
-            this.ctx = this.canv.getContext('2d');
-        }
-        this.ctx.clearRect(0, 0, this.canv.width, this.canv.height);
-        this.DrawGridLines();
-
-        // Draw DateLines and pre/post market
-        // afterhrstodraw has lists [start, end]
-        let afterHoursStart = 'blank';
-        // if we haven't drawn any afterhours, check to see if whole screen should be dark
-        let haventDrawnAny = true;
-        for (var j = firstInd; j <= this.linkedChart.dynChartWindowData.lastIndex; j++) {
-            if (Array.isArray(this.linkedChart.upperChartMiscData.afterHours[j])) {
-                //see if it's in pre or post
-                // if it's pre, we end the line
-                if (this.linkedChart.upperChartMiscData.afterHours[j][0] == 'pre') {
-                    this.DrawPrePostMarket(afterHoursStart, (this.indexCount * this.xscale + this.linkedChart.upperChartMiscData.afterHours[j][1] * this.availableWidth / (this.indexlength * this.linkedChart.secondsPerCandle) + this.startingXPos) - afterHoursStart);
-                    afterHoursStart = 'blank';
-                    haventDrawnAny = false;
-                }
-                else {
-                    afterHoursStart = this.indexCount * this.xscale + this.linkedChart.upperChartMiscData.afterHours[j][1] * this.availableWidth / (this.indexlength * this.linkedChart.secondsPerCandle) + this.startingXPos;
-                }
-
-            }
-            else if (j == firstInd && this.linkedChart.upperChartMiscData.afterHours[firstInd] == 'after') {
-                afterHoursStart = this.startingXPos;
-            }
-            // check if we hit the end. check if afterhours start has a value, if not check if whole screen should be gray
-            if (j == this.linkedChart.dynChartWindowData.lastIndex) {
-                if (afterHoursStart != 'blank') {
-                    this.DrawPrePostMarket(afterHoursStart, this.availableWidth + this.startingXPos);
-                    afterHoursStart = 'blank';
-                }
-                else if (haventDrawnAny) {
-                    // check to see if ANY candle is in afterhours, if so whole screen is
-                    if (this.linkedChart.upperChartMiscData.afterHours[j] == 'after') {
-                        this.DrawPrePostMarket(this.startingXPos, this.startingXPos + this.availableWidth);
-                    }
-                }
-            }
-            if (this.linkedChart.upperChartMiscData.dateLines[j]) {
-                this.DrawDateLine(j);
-            }
-            this.indexCount += 1;
-        }
-        this.indexCount = 0;
-
-        
-
-        // Draw candlesticks
-        for (var j = firstInd; j <= this.linkedChart.dynChartWindowData.lastIndex; j++) {
-            this.DrawCandlestick(j);
-            this.indexCount += 1;
-        }
-        this.indexCount = 0;
-
-        // Draw indicators
-        for (let n = 0; n < this.linkedChart.upperChartIndicatorData.length; n++) {
-            // Set color
-            this.ctx.strokeStyle = tempStrat.indicators[n].params.color;
-            for (var j = firstInd; j <= this.linkedChart.dynChartWindowData.lastIndex; j++) {
-                this.DrawUpperIndicatorLine(n, j);
-                this.indexCount += 1;
-                // If there is a value past the chart, we can draw the last line to it
-                if (j == this.linkedChart.dynChartWindowData.lastIndex && j < this.linkedChart.upperChartIndicatorData[n].length - 1) {
-                    this.DrawUpperIndicatorLine(n, j + 1);
-                }
-            }
-            this.indexCount = 0;
-        }
-        // TODO: make draw buy and sell run faster - both at same time etc
-        // Draw Buy
-        if (this.linkedChart.buyIndexList.length > 0) {
-            for (var j = firstInd; j <= this.linkedChart.dynChartWindowData.lastIndex; j++) {
-
-                if (this.linkedChart.buyIndexList[j]) {
-                    this.DrawBuySellAction(j, true, 'close');
-                }
-                this.indexCount += 1;
-            }
-            this.indexCount = 0;
-        }
-        if (this.linkedChart.sellIndexList.length > 0) {
-            for (let j = firstInd; j <= this.linkedChart.dynChartWindowData.lastIndex; j++) {
-                if (this.linkedChart.sellIndexList[j]) {
-                    this.DrawBuySellAction(j, false, 'close');
-                }
-                this.indexCount += 1;
-            }
-            this.indexCount = 0;
-        }
-
-        this.DrawGridLineData();
-
-    }
-    DrawGridLines() {
-        this.ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
-        let inc = Math.floor((this.high - this.low) / 5);
-        if (inc >= 1) {
-            let numbString = inc.toString();
-            let newString = numbString[0];
-
-            for (var i = 1; i < numbString.length; i++)
-            {
-                newString += '0';
-            }
-            let increment = parseInt(newString);
-            let hConstraint = Math.floor(this.high / increment) * increment;
-            let lConstraint = Math.ceil(this.low / increment) * increment;
-            this.gridLineDat = [];
-            for (var i = lConstraint; i <= hConstraint; i += increment) {
-                this.gridLineDat.push(i);
-                this.ctx.beginPath();
-                this.ctx.moveTo(this.startingXPos, (this.high - i) * this.scale);
-                this.ctx.lineTo(this.startingXPos + this.availableWidth, (this.high - i) * this.scale);
-                this.ctx.stroke();
-            }
-        } else {
-            let increment = (this.high - this.low) / 5;
-            //console.log(increment.toFixed.toString());
-            let numbString = increment.toFixed(20).toString();
-            let newString = '';
-            let hitFirstDig = false;
-            let zeroesBeforeNumb = 0;
-            // start i at first numb after decimal
-            for (var i = 2; i < numbString.length; i++) {
-                if (numbString[i] != '0') {
-                    hitFirstDig = true;
-                }
-                if (!hitFirstDig) {
-                    zeroesBeforeNumb += 1;
-                    continue;
-                }
-                newString = '0.';
-                for (var j = 0; j < zeroesBeforeNumb; j++) {
-                    newString += '0';
-                }
-                newString += numbString[i];
-                break;
-            }
-            //console.log('newstring: ' + parseFloat(newString));
-            //console.log(Math.round(this.low / parseFloat(newString)) * parseFloat(newString));
-            var j = 0;
-            while (j < this.low) {
-                j += parseFloat(newString);
-            }
-            // lconstraint
-            let lconstString = '';
-            let lw = this.low.toString();
-            let hitDec = false;
-            let countAfterDec = 0;
-            for (var i = 0; i < lw.length; i++) {
-                if (hitDec) {
-                    countAfterDec += 1;
-                }
-                if (countAfterDec > zeroesBeforeNumb) {
-                    lconstString += Math.round(parseFloat(lw[i] + '.' + lw[i + 1])).toString();
-                    break;
-                } else {
-                    lconstString += lw[i];
-                }
-
-                if (lw[i] == '.') {
-                    hitDec = true;
-                }
-            }
-            //console.log(this.low);
-            //console.log('lconst ' + parseFloat(lconstString));
-
-
-            increment = parseFloat(newString);
-            let hConstraint = Math.round(this.high / parseFloat(newString)) * parseFloat(newString);
-            let lConstraint = parseFloat(lconstString);
-            //console.log(hConstraint);
-            //console.log(lConstraint);
-            this.gridLineDat = [];
-            for (var i = lConstraint; i <= hConstraint; i += increment) {
-                this.gridLineDat.push(i);
-                this.ctx.beginPath();
-                this.ctx.moveTo(this.startingXPos, (this.high - i) * this.scale);
-                this.ctx.lineTo(this.startingXPos + this.availableWidth, (this.high - i) * this.scale);
-                this.ctx.stroke();
-            }
-        }
-
-    }
-    DrawGridLineData() {
-        this.ctx.fillStyle = 'white';
-        this.ctx.fillRect(this.canv.width - this.endingXPadding, 0, this.endingXPadding, this.canv.height);
-        // now the text
-        this.ctx.fillStyle = 'black';
-        this.ctx.textBaseline = 'middle';
-        this.ctx.font = '12px arial';
-        for (let v = 0; v < this.gridLineDat.length; v++) {
-            this.ctx.fillText(this.gridLineDat[v], this.canv.width - this.endingXPadding, (this.high - this.gridLineDat[v]) * this.scale);
-        }
-    }
-    
-    DrawCandlestick(ind) {
-        var ohlc = this.linkedChart.parsedDat[ind];
-        var green = ohlc.open <= ohlc.close;
-        let firstX = this.indexCount * this.xscale + this.startingXPos;
-        if (ohlc.open == ohlc.close) {
-            this.ctx.fillStyle = 'rgb(0, 255, 0)';
-            this.ctx.beginPath();
-            this.ctx.moveTo(firstX, (this.high - ohlc.close) * this.scale);
-            this.ctx.lineTo((this.indexCount + 1) * this.xscale + this.startingXPos, (this.high - ohlc.close) * this.scale);
-            this.ctx.stroke();
-        } else if (green) {
-            this.ctx.fillStyle = 'rgb(0, 255, 0)';
-            this.ctx.fillRect(firstX, (this.high - ohlc.close) * this.scale + this.graphDat.topPadding, this.xscale, (ohlc.close - ohlc.open) * this.scale);
-        } else {
-            this.ctx.fillStyle = 'rgb(255, 0, 0)';
-            this.ctx.fillRect(firstX, (this.high - ohlc.open) * this.scale + this.graphDat.topPadding, this.xscale, (ohlc.open - ohlc.close) * this.scale);
-        }
-        // High Low
-        var lineWidth = this.xscale / 8;
-        this.ctx.fillRect(firstX + this.xscale / 2 - lineWidth / 2, (this.high - ohlc.high) * this.scale + this.graphDat.topPadding, lineWidth, (ohlc.high - ohlc.low) * this.scale); 
-
-    }
-    DrawDateLine(bigIndex) {
-        /**
-         * Draw vertical line where there's a new day. If it's the leftmost candle, skip.
-         */
-        if (this.indexCount == 0) return;
-        this.ctx.strokeStyle = 'rgb(100, 100, 100)';
-        let xpos = this.indexCount * this.xscale + this.startingXPos;
-        this.ctx.beginPath();
-        this.ctx.moveTo(xpos, 0);
-        this.ctx.lineTo(xpos, this.canv.height - this.graphDat.botPadding);
-        this.ctx.stroke();
-        let date = new Date(this.linkedChart.parsedDat[bigIndex].timestamp * 1000);
-        let month = date.getMonth() + 1;
-        let day = date.getDate();
-        let year = date.getFullYear();
-        let dateString = month + '/' + day + '/' + year;
-        this.ctx.fillStyle = 'blue';
-        this.ctx.textAlign = 'center';
-        this.ctx.font = '12px arial';
-        this.ctx.fillText(dateString, xpos, this.canv.height - this.graphDat.botPadding / 2);
-    }
-    DrawPrePostMarket(startPos, endPos) {
-        // called on every candle because apparently there are fucking random skips
-        // in the stock market like 4:30am to 5am and shit
-        this.ctx.fillStyle = 'rgba(200, 200, 220, .3)';
-        this.ctx.fillRect(startPos, 0, endPos, this.canv.height);
-        return;
-
-        
-        console.log('bigind:',bigIndex)
-        let startingTime = new Date(this.linkedChart.parsedDat[bigIndex].timestamp * 1000);
-        let timeStringList = startingTime.toLocaleString('en-US', {timeZone: 'America/New_York'}).split(", ")[1].split(" ");
-        // DOING PREMARKET
-        if (!('9:30' > timeStringList[0] && timeStringList[1] == 'AM') || timeStringList[0].split(':')[0].length > 1) return; // it's not premarket
-        // convert candle time to minutes
-        // since it's am, hour is first digit
-        let timeInSecs = parseInt(timeStringList[0][0]) * 60 * 60;
-        // now minutes
-        timeInSecs += parseInt(timeStringList[0].split(':')[1]) * 60;
-        // 9:30 in minutes is 570
-        // 9:30 in secs is 34200
-        console.log(timeStringList)
-
-            
-        let intervalType = this.linkedChart.chartInterval.split(" ")[1];
-        let intervalNum = parseInt(this.linkedChart.chartInterval.split(" ")[0]);
-        let pmarkwidth;
-        // first check if candle ends out of premarket
-        if (timeInSecs + this.linkedChart.secondsPerCandle > 34200) {
-            let timeToDrawInSecs = 34200 - timeInSecs;
-            console.log(timeToDrawInSecs / 60)
-            pmarkwidth = timeToDrawInSecs * this.availableWidth / (this.indexlength * this.linkedChart.secondsPerCandle);
-
-        }
-        else {
-            pmarkwidth = this.xscale;
-        }
-        //drawing pre
-        let startingxpos = this.indexCount * this.xscale + this.startingXPos;
-        // 19800 is seconds for premarket - 5.5 hrs
-
-        // so it was either use .toLocaleString(), use moment timezone library, or do my own math
-        // to get the timezone converted correctly. I chose tolocalestring
-
-        //TODO: now delete this.canvwidth from chart class
-        
-
-        //this.linkedChart.dynChartWindowData.zoom/
-
-    }
-    DrawUpperIndicatorLine(indicatorIndex, ind) {
-        //skip if it's the first one
-        if (ind == 0 || this.linkedChart.upperChartIndicatorData[indicatorIndex][ind - 1] == null) return;
-        let val = this.linkedChart.upperChartIndicatorData[indicatorIndex][ind];
-        let prev = this.linkedChart.upperChartIndicatorData[indicatorIndex][ind - 1];
-        this.ctx.beginPath();
-        this.ctx.moveTo((this.indexCount - 1) * this.xscale + this.xscale / 2 + this.startingXPos, (this.high - prev) * this.scale + this.graphDat.topPadding);
-        this.ctx.lineTo(this.indexCount * this.xscale + this.xscale / 2 + this.startingXPos, (this.high - val) * this.scale + this.graphDat.topPadding);
-        this.ctx.stroke();
-    }
-
-    DrawBuySellAction(ind, buy, ohlc) {
-        if (buy)
-            this.ctx.fillStyle = 'rgba(5, 150, 5, .6)';
-        else
-            this.ctx.fillStyle = 'rgba(150, 5, 5, .6)';
-        this.ctx.beginPath();
-        let dat = this.linkedChart.parsedDat[ind];
-        let xval = this.indexCount * this.xscale + this.startingXPos + this.xscale / 2;
-        // TODO: make yval be where it actually should
-        let yval = (this.high - dat[ohlc]) * this.scale + this.graphDat.topPadding;
-        this.ctx.arc(xval, yval, this.xscale / 3, 0, Math.PI * 2, true);
-        this.ctx.fill();
-
-    }
-}
-
-
-
-
-
+// Graph class used to be here
 
 
 // #############################################################################################
@@ -1756,6 +683,9 @@ function UpdateStratFileAndGraph(loading=false) {
     /**
      * If we loading a strat we wont update tempstrat
      */
+    console.log('tempstratbp:')
+    console.log(JSON.parse(JSON.stringify(tempStrat.buyStratBP)));
+    console.log(tempStrat);
     if (!loading)
         ipcRenderer.send('currentStrat:updateFile', tempStrat);
     for (let i = 0; i < chartList.length; i++) {
@@ -1791,24 +721,26 @@ function VariableDropdown(buy) {
 // returns newly created object, or object that was passed in
 function AddBuyComparison(logicop=null, obj=null, loading=false) {
     if (logicop != null)
-        AddBuyLogicOp(logicop);
+        AddBuyLogicOp(logicop, loading);
     
     AddComparison(obj, true, loading);
 }
-function AddBuyLogicOp(o) {
+function AddBuyLogicOp(o, loading) {
     document.getElementById('buyStratBox').appendChild(CreateLogicalOperatorDiv(o, tempStrat.buyStratBP.length));
-    tempStrat.buyStratBP.push(o);
+    if (!loading)
+        tempStrat.buyStratBP.push(o);
 }
 function AddSellComparison(logicop=null, obj=null, loading=false) {
     // TODO: check if blueprint length is empty, then skip
     if (logicop != null) {
-        AddSellLogicOp(logicop);
+        AddSellLogicOp(logicop, loading);
     }
     AddComparison(obj, false, loading);
 }
-function AddSellLogicOp(o) {
+function AddSellLogicOp(o, loading) {
     document.getElementById('sellStratBox').appendChild(CreateLogicalOperatorDiv(o, tempStrat.sellStratBP.length, false));
-    tempStrat.sellStratBP.push(o);
+    if (!loading)
+        tempStrat.sellStratBP.push(o);
 }
 
 function AddComparison(obj, buy, loading) {
@@ -1831,17 +763,22 @@ function AddComparison(obj, buy, loading) {
         stratBoxName = 'sellStratBox';
         varDropdownName = 'sellVariableDropdown';
     }
+    if (loading) // ERROR FIXME might fuck up loading in strats. but this fixed adding indicator
+        id--;
+
     let newthing;
     // first init object
     if (obj == null) { 
         newthing = {
             first: {
                 type: 'price',
-                params: GetDefaultStratVarParameters('price')
+                params: GetDefaultStratVarParameters('price'),
+                tsId: ''
             },
             second: {
                 type: 'price',
-                params: GetDefaultStratVarParameters('price')
+                params: GetDefaultStratVarParameters('price'),
+                tsId: ''
             },
             compareOp: '&lt',
             notted: false
@@ -1929,11 +866,15 @@ function AddComparison(obj, buy, loading) {
     });
 
     //updating variables
-    if (buy) {
-        tempStrat.buyStratBP.push(newthing);
-    }
-    else {
-        tempStrat.sellStratBP.push(newthing);
+    // this might fuck up loading in strats
+    if (!loading)
+    {
+        if (buy) {
+            tempStrat.buyStratBP.push(newthing);
+        }
+        else {
+            tempStrat.sellStratBP.push(newthing);
+        }
     }
     UpdateStratFileAndGraph(loading);
 }
@@ -1956,9 +897,15 @@ function GetDefaultStratVarParameters(varType) {
                 index: 0
             };
             break;
-        case 'ma':
+        case 'MA':
             pramz = {
                 index: 0
+            };
+            break;
+        case 'BOL':
+            pramz = {
+                band: 'upper band',
+                index: 0 // TODO add upper, lower bands, sma
             };
             break;
         case 'buy-price':
@@ -1970,6 +917,11 @@ function GetDefaultStratVarParameters(varType) {
             pramz = {
                 units: 'minutes'
             };
+            break;
+        case 'VOL':
+            pramz = {
+                index: 0
+            }
             break;
         default:
             pramz = {};
@@ -2191,6 +1143,38 @@ function CreateVarDiv(varType, isFirstCompare, params, indexInList, buy, varMath
     /**
      * Creates an html element for strategy variable (price, etc)
      */
+    function CreateVarDivDropdownOption(paramType, values)
+    {
+        /**
+         * Creates and returns dropdown to specify what part of the indicator/data we're using
+         */
+        let selectEl = document.createElement('select');
+        for (let i = 0; i < values.length; i++)
+        {
+            let op = document.createElement('option');
+            op.value = values[i];
+            op.innerHTML = values[i];
+            selectEl.appendChild(op);
+        }
+        selectEl.value = params[paramType]; // where does params choose this
+        selectEl.addEventListener('change', function(e) {
+            if (buy) {
+                if (tempStrat.buyStratBP[FindIndexInBlueprint(indexInList)][firstOrSec].type == 'math')
+                    tempStrat.buyStratBP[FindIndexInBlueprint(indexInList)][firstOrSec].params.mathBp[varMathPosition].params[paramType] = this.value;
+                else
+                    tempStrat.buyStratBP[FindIndexInBlueprint(indexInList)][firstOrSec].params[paramType] = this.value;
+            }
+            else {
+                if (tempStrat.sellStratBP[FindIndexInBlueprint(indexInList)][firstOrSec].type == 'math')
+                    tempStrat.sellStratBP[FindIndexInBlueprint(indexInList)][firstOrSec].params.mathBp[varMathPosition].params[paramType] = this.value;
+                else
+                    tempStrat.sellStratBP[FindIndexInBlueprint(indexInList)][firstOrSec].params[paramType] = this.value;
+            }
+            UpdateStratFileAndGraph();
+        });
+        return selectEl;
+    }
+
     let firstOrSec;
     if (isFirstCompare)
         firstOrSec = 'first';
@@ -2206,6 +1190,11 @@ function CreateVarDiv(varType, isFirstCompare, params, indexInList, buy, varMath
     containy.style.display = 'inline-grid';
     //containy.style.gridTemplateRows = '3fr 1fr';
 
+
+    let divChartRef = document.createElement('div');
+    divChartRef.style.borderBottom = '2px dotted gray';
+    divChartRef.appendChild(CreateVarChartSelection(mainContainy));
+    containy.appendChild(divChartRef);
 
     let divTitle = document.createElement('div');
     divTitle.style.borderBottom = '1px solid black';
@@ -2302,6 +1291,9 @@ function CreateVarDiv(varType, isFirstCompare, params, indexInList, buy, varMath
             UpdateStratFileAndGraph();
         });
     }
+    if ('band' in params) {
+        containy.appendChild(CreateVarDivDropdownOption('band', ["upper band", "middle band", "lower band"]));
+    }
 
     mainContainy.appendChild(containy);
 
@@ -2379,6 +1371,21 @@ function AppendMathElements(mathButton, containerDiv, secondVar, mathOp, isFirst
     }
 }
 
+function CreateVarChartSelection(containerDiv)
+{
+    // TODO add actual functionality
+    
+    let chartSelection = document.createElement('select');
+    for (let i = 0; i < chartList.length; i++)
+    {
+        let chartOptn = document.createElement('option');
+        chartOptn.value = chartList[i].name;
+        chartOptn.innerHTML = chartOptn.value;
+        chartSelection.appendChild(chartOptn);
+    }
+    return chartSelection;
+}
+
 function CreateVarTypeSelection(containerDiv, initType, id, isFirstComparison, mathVarPosition, buy) {
     /**
      * Cleaner code.
@@ -2413,9 +1420,15 @@ function CreateVarTypeSelection(containerDiv, initType, id, isFirstComparison, m
     //when indicator data is changed, we need to update name in this div
     // like indicator added, removed, or params changed
     for (let indic = 0; indic < tempStrat.indicators.length; indic++) {
+        let indObj = tempStrat.indicators[indic];
         let newOptn = document.createElement('option');
-        newOptn.value = tempStrat.indicators[indic].type;
-        newOptn.innerHTML = tempStrat.indicators[indic].type;
+        newOptn.value = indObj.type;
+        newOptn.innerHTML = indObj.type;
+        if (indObj.params.hasOwnProperty('period'))
+        {
+            newOptn.innerHTML += indObj.params.period;
+        }
+        newOptn.id = indic; // use this to reference tempstrat.indicators
         varSelection.appendChild(newOptn);
     }
 
@@ -2428,10 +1441,16 @@ function CreateVarTypeSelection(containerDiv, initType, id, isFirstComparison, m
         //update the blueprint var, then tempstrat and finally tempstrat JSON file
         let newObj = {
             type: this.value,
-            params: GetDefaultStratVarParameters(this.value)
+            params: GetDefaultStratVarParameters(this.value),
+            tsId: this.options[this.options.selectedIndex].id // id of selected option elem
         };
+        console.log(this.id);
         // replaced buystratblueprint and sell below with tempstrat
         if (buy) {
+            // console.log(id)
+            // console.log(FindIndexInBlueprint(id));
+            // console.log(tempStrat.buyStratBP);
+            // console.log(tempStrat.buyStratBP[FindIndexInBlueprint(id)]);
             if (tempStrat.buyStratBP[FindIndexInBlueprint(id)][firstOrSec].type == 'math')
                 tempStrat.buyStratBP[FindIndexInBlueprint(id)][firstOrSec].params.mathBp[mathVarPosition] = JSON.parse(JSON.stringify(newObj));
             else
@@ -2468,11 +1487,12 @@ function ResetVarDiv(divItem, isFirst, id, mathVarPosition, buy) {
         else
             objDat = tempStrat.sellStratBP[FindIndexInBlueprint(id)][firstOrSec];
     }
+    // TODO figure out wtf the belowline means. and parentdiv works??
     // TODO: save params? like if you switch var then go bakc yanno??
 
     let parentDiv = divItem.parentElement;
-    console.log(mathVarPosition);
-    console.log(objDat);
+    // console.log(mathVarPosition);
+    // console.log(objDat);
     let newVarDiv = CreateVarDiv(objDat.type, isFirst, objDat.params, id, buy, mathVarPosition);
     parentDiv.replaceChild(newVarDiv, divItem);
 }
@@ -2484,6 +1504,8 @@ function GenerateLowerStrategy(buyBluep, sellBluep, loading=false) {
      */
     let buyBP = JSON.parse(JSON.stringify(buyBluep));
     let sellBP = JSON.parse(JSON.stringify(sellBluep));
+    console.log("buyBP")
+    console.log(buyBP);
     ClearLowerStrategy();
     let skip = false;
     for (let i = 0; i < buyBP.length; i++) {
@@ -2500,7 +1522,7 @@ function GenerateLowerStrategy(buyBluep, sellBluep, loading=false) {
         else {
             // object
             // only happens if first one
-            AddBuyComparison(null, buyBP[i], loading);
+            AddBuyComparison(null, buyBP[i], loading); // this is fucking up tempstrat buybp etc when add ind
         }
     }
     // Now repeat for sellstrat

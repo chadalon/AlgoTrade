@@ -36,6 +36,8 @@
                             </button>
                             <div id="indicatorSelect" class="dropdown-content">
                                 <a href="javascript:AddIndicator('MA')">Moving Average</a>
+                                <a href="javascript:AddIndicator('VOL')">Volume</a>
+                                <a href="javascript:AddIndicator('BOL')">Bollinger Bands</a>
                             </div>
                         </div>
                     </div>
@@ -50,53 +52,60 @@
         </div>
     </div>
     <div id="stratDesign">
-        <div id="topStratOptions">
-            <h1 style="margin: 0px;">Strategies</h1>
-            <div>
-                <label for="shortingBool">Shorting market:</label>
-                <input type="checkbox" id="shortingBool">
+        <div id="botContain">
+            <div id="topStratOptions">
+                <h1 style="margin: 0px;">Strategies</h1>
+                <div>
+                    <label for="shortingBool">Shorting market:</label>
+                    <input type="checkbox" id="shortingBool">
+                    <label for="afterHours">Only trade during Wall Street day:</label>
+                    <input type="checkbox" id="afterHours">
+                </div>
             </div>
-        </div>
-        
-        <div id="stratBuy">
-            <h1>Buy: if </h1>
-            <div id="buyStratBox" class="stratBox">
-                
-            </div>
-            <div id="buyVariableDropdown" class="dropdown">
-                <div class="stratDropdownCenter">
-                    <button class="coolButt" onclick="VariableDropdown(true)">
-                        <div class="plus vPlus"></div>
-                        <div class="plus hPlus"></div>
-                    </button>
-                    <div id="buyVariableSelect" class="dropdown-content">
-                        <a href="javascript:AddBuyComparison('AND')">AND</a>
-                        <a href="javascript:AddBuyComparison('OR')">OR</a>
+            
+            <div id="stratBuy">
+                <h1>Buy: if </h1>
+                <div id="buyStratBox" class="stratBox">
+                    
+                </div>
+                <div id="buyVariableDropdown" class="dropdown">
+                    <div class="stratDropdownCenter">
+                        <button class="coolButt" onclick="VariableDropdown(true)">
+                            <div class="plus vPlus"></div>
+                            <div class="plus hPlus"></div>
+                        </button>
+                        <div id="buyVariableSelect" class="dropdown-content">
+                            <a href="javascript:AddBuyComparison('AND')">AND</a>
+                            <a href="javascript:AddBuyComparison('OR')">OR</a>
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
-        <div id="stratSell">
-            <h1 style="display:inline;">Sell: if </h1>
-            <div id="sellStratBox" class="stratBox">
+            <div id="stratSell">
+                <h1 style="display:inline;">Sell: if </h1>
+                <div id="sellStratBox" class="stratBox">
 
-            </div>
-            <div id="sellVariableDropdown" class="dropdown">
-                <div class="stratDropdownCenter">
-                    <button class="coolButt" onclick="VariableDropdown(false)">
-                        <div class="plus vPlus"></div>
-                        <div class="plus hPlus"></div>
-                    </button>
-                    <div id="sellVariableSelect" class="dropdown-content">
-                        <a href="javascript:AddSellComparison('AND')">AND</a>
-                        <a href="javascript:AddSellComparison('OR')">OR</a>
+                </div>
+                <div id="sellVariableDropdown" class="dropdown">
+                    <div class="stratDropdownCenter">
+                        <button class="coolButt" onclick="VariableDropdown(false)">
+                            <div class="plus vPlus"></div>
+                            <div class="plus hPlus"></div>
+                        </button>
+                        <div id="sellVariableSelect" class="dropdown-content">
+                            <a href="javascript:AddSellComparison('AND')">AND</a>
+                            <a href="javascript:AddSellComparison('OR')">OR</a>
+                        </div>
                     </div>
                 </div>
-            </div>
 
-        </div>
-        <div id="stratStop">
-            <h1 style="display:inline;">Stop Loss: </h1>
+            </div>
+            <div id="stratStop">
+                <h1 style="display:inline;">Stop Loss: </h1>
+            </div>
+            <div id="stratResult">
+                <h2>Strat Results:</h2>
+            </div>
         </div>
 
     </div>

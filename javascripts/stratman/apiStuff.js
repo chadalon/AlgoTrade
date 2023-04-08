@@ -1,4 +1,5 @@
 // following three lines + func were just in stratman.js
+// remove / enable checkbal button depending on offline status
 const checkBal = document.getElementById('getBal');
 const showBal = document.getElementById('showBal');
 checkBal.addEventListener('click', function() {
@@ -55,23 +56,18 @@ function GetTheCandles(pa, chartNum) {
      * This function connects to the desired api to retrieve history, and formats it to make it universal.
      * TODO: find out how to plug in data
      */
-    let chartInterval = chartList[chartNum].chartInterval;
-    let intervalType = chartInterval.split(" ")[1];
-    let intervalNum = parseInt(chartInterval.split(" ")[0]);
-    var graph = {
-        chartNumber: chartNum,
-        element: document.getElementById('graph' + chartNum),
-        topPadding: 10,
-        botPadding: 40
+    let interv = qm.ParseCandleInterval(chartList[chartNum].chartInterval);
+    let intervalNum = interv[0];
+    let intervalType = interv[1];
+    if (intervalType == 'hour')
+    {
+        intervalType = 'minute';
+        intervalNum *= 60;
     }
 
-    if (intervalType == 'hours') {
-        intervalNum *= 60;
-        intervalType = 'minute';
-    }
     if (tempStrat.token[0] == 'kraken') {
         
-        console.log(intervalNum);
+        //console.log(intervalNum);
         const nonce = GetNonce();
         if (pa == null) return;
         request = {
@@ -94,15 +90,15 @@ function GetTheCandles(pa, chartNum) {
                     'pair': pa,
                     'interval': intervalNum
                 }, tempStrat.token[1].secret, nonce),
-                'content-type': 'application/x-www-form-urlencoded;charset=utf-8',
-                'user-agent': 'Node.js app'
+                'content-type': 'application/x-www-form-urlencoded;charset=utf-8'/*,
+                'user-agent': 'Node.js app'*/
 
             }
         })
         .then((response) => {
             res = response.data.result;
-            console.log(response.data);
-            chartList[chartNum].InitData('kraken', graph, Object.values(res)[0]);
+            //console.log(response.data);
+            chartList[chartNum].InitData('kraken', Object.values(res)[0]);
         })
         .catch((error) => {
             console.log(error);
@@ -132,9 +128,9 @@ function GetTheCandles(pa, chartNum) {
         const getItMasteria = async () => {
             const thedat = getDat()
             .then(response => {
-                console.log(response.data);
+                //console.log(response.data);
                 let res = response.data.candles;
-                chartList[chartNum].InitData('td', graph, res);
+                chartList[chartNum].InitData('td', res);
             })
             .catch(error => {
                 console.log(error);

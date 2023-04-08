@@ -1,5 +1,6 @@
 html {
     height: 100%;
+    font-family: Arial, Helvetica, sans-serif;
 }
 body {
     margin: 0px;
@@ -134,7 +135,13 @@ canvas {
     height: 30%;
     width: 100%;
     background-color: #aeaeae;
+    overflow-y: scroll;
 }
+#botContain {
+    display: grid;
+    grid-template-columns: 3fr 2fr;
+}
+
 #topStratOptions {
     display: flex;
 }
@@ -255,4 +262,8 @@ background-color: #e9e9e9;
 .autocomplete-active {
 background-color: DodgerBlue !important; 
 color: #ffffff; 
+}
+
+#rightSide {
+    overflow-y: scroll;
 }
