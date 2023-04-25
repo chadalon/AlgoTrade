@@ -5,8 +5,10 @@
 /// graph: object for the graph this is connected to
 /// there can be multiple charts
 /// backtestData: all the data we pulled
+const Results = require('./Results.js');
 class Chart {
     constructor(params = null/*exchange, graphdat, backtestData*/) {
+        this.finishedCalcs = false;
         //TODO: make sure this works
         if (params && params.hasOwnProperty('chartInterval')) {
             this.chartInterval = params[chartInterval];
@@ -486,10 +488,10 @@ class Chart {
         let indicator = tempStrat.indicators[Number(obj.tsId)];
         // console.log(obj);
         // console.log(this.stratIndex - obj.params.index);
-        console.log(indicator.params.period);
+        //console.log(indicator.params.period);
         if (indicator.params.hasOwnProperty('period') && this.stratIndex - obj.params.index < indicator.params.period - 1)
             return 'no';
-        console.log(this.upperChartIndicatorData[indx[0]].data[indDatIndex][this.stratIndex - obj.params.index]);
+        //console.log(this.upperChartIndicatorData[indx[0]].data[indDatIndex][this.stratIndex - obj.params.index]);
         if (IndicatorIsUpperChart(indicator.type))
         {
             return this.upperChartIndicatorData[indx[0]].data[indDatIndex][this.stratIndex - obj.params.index];
@@ -521,6 +523,8 @@ class Chart {
          * then redraws chart.
          * returns optional data (for list testing)
          */
+        this.finishedCalcs = false;
+        this.DetermineFees();
         if (this.startWithBuy) {
             this.tradingCash = this.startingCash;
             this.tradingStock = 0;
@@ -607,6 +611,8 @@ class Chart {
             if (runningList) {
                 pairListResults.push(this.stratResults);
             }
+            this.finishedCalcs = true;
+            Results.DisplayResults(this.pair);
             console.log('Ending money:', this.tradingCash);
             console.log('Ending stock:', this.tradingStock);
         }
@@ -615,20 +621,37 @@ class Chart {
         if (this.myGraph && drawingStrat) 
             this.myGraph.DrawChart();
     }
+    DetermineFees()
+    {
+        switch(this.apiType)
+        {
+            case "kraken":
+                this.buyFee = .0026; // max amt
+                this.sellFee = .0026;
+                return;
+            default:
+                this.buyFee = .001;
+                this.sellFee = .001;
+                return;
+        }
+    }
     OnBuyOrSell(buy, percentageToUse=1) {
         // TODO: am i calculating this right? should we buy on next candle or what?
         // also resetting values to 0 is not accurate at ALL bro
         // look at ur old trading project to calculate accurately
         // if you change close here, change it in getvarvalue buy-price
+        // TODO FLOATING PT ERRORS
         let stockPrice = this.parsedDat[this.stratIndex].close;
+        if (this.parsedDat.length > this.stratIndex + 1)
+            stockPrice = this.parsedDat[this.stratIndex + 1].open; // JUST ADDED THIS
         switch (tempStrat.token[0]) {
             case 'kraken':
                 if (buy) {
-                    this.tradingStock += this.tradingCash * percentageToUse / stockPrice;
+                    this.tradingStock += (this.tradingCash * percentageToUse) * (1 - this.buyFee) / stockPrice;
                     this.tradingCash -= this.tradingCash * percentageToUse;
                 }
                 else {
-                    this.tradingCash += this.tradingStock * stockPrice;
+                    this.tradingCash += this.tradingStock * stockPrice * (1 - this.sellFee);
                     this.tradingStock = 0;
                 }
                 break;
@@ -639,7 +662,7 @@ class Chart {
                         console.log('NOT ENOUGH FUNDS');
                         return;
                     }
-                    let stockQuant = Math.floor(this.tradingCash * percentageToUse / stockPrice);
+                    let stockQuant = Math.floor(this.tradingCash * percentageToUse / stockPrice); //TODO ADD STOCK FEES
                     this.tradingStock += stockQuant;
                     this.tradingCash -= stockQuant * stockPrice;
                     console.log('tradingStock:',this.tradingStock);
@@ -921,7 +944,7 @@ class Chart {
                 break;
             case 'BOL':
                 CalcSMA(this, myObject.periodList, myObject.tempDatList, 'TP', INDICATOR_DAT.params.period);
-                console.log(myObject.periodList.length, INDICATOR_DAT.params.period);
+                //console.log(myObject.periodList.length, INDICATOR_DAT.params.period);
                 if (myObject.periodList.length != INDICATOR_DAT.params.period - 1) // TODO CHECK -1 ??
                 {
                     myObject.BOLUList.push(null);

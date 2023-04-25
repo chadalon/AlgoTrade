@@ -18,8 +18,8 @@ class Graph {
             drawingClickData: true
         }
 
-        if (drawingStrat)
-            this.DrawChart();
+        // if (drawingStrat)
+        //     this.DrawChart();
         
 
         this.slider = document.createElement('input');
@@ -69,6 +69,8 @@ class Graph {
         this.canv.onmousedown = (e) => this.MouseClicked(e);
 
         this.ComputeWidth();
+        if (drawingStrat)
+            this.DrawChart();
     }
     ScrollerTest(e)
     {
@@ -199,7 +201,12 @@ class Graph {
             for (var j = firstInd; j <= this.linkedChart.dynChartWindowData.lastIndex; j++) {
 
                 if (this.linkedChart.buyIndexList[j]) {
-                    this.DrawBuySellAction(j, true, 'close');
+                    /*
+                    if (j + 1 < this.linkedChart.buyIndexList.length)
+                        this.DrawBuySellAction(j + 1, true, 'open')
+                    else
+                    */
+                        this.DrawBuySellAction(j, true, 'close');
                 }
                 this.indexCount += 1;
             }
@@ -208,7 +215,12 @@ class Graph {
         if (this.linkedChart.sellIndexList.length > 0) {
             for (let j = firstInd; j <= this.linkedChart.dynChartWindowData.lastIndex; j++) {
                 if (this.linkedChart.sellIndexList[j]) {
-                    this.DrawBuySellAction(j, false, 'close');
+                    /*
+                    if (j + 1 < this.linkedChart.sellIndexList.length)
+                    this.DrawBuySellAction(j + 1, false, 'open');
+                    else
+                    */
+                        this.DrawBuySellAction(j, false, 'close');
                 }
                 this.indexCount += 1;
             }
@@ -260,6 +272,8 @@ class Graph {
                         }
                     }
                     this.indexCount = 0;
+                    // console.log("drawd vol")
+                    // console.log(firstInd + 1, this.linkedChart.dynChartWindowData.lastIndex);
                     break;
             }
 
@@ -650,6 +664,18 @@ class Graph {
                 stri += tsObj.params.period;
             stri += ": ";
             stri += this.linkedChart.lowerChartIndicatorData[i].data[0][this.clickIndex];
+            this.ctx.fillText(stri, myCurX, myCurY, this.clickDataWidth);
+            myCurY += font_size;
+        }
+        if (tempStrat.buyStratBP.length > 0 && this.linkedChart.buyIndexList[this.clickIndex])
+        {
+            stri = "Buy triggered";
+            this.ctx.fillText(stri, myCurX, myCurY, this.clickDataWidth);
+            myCurY += font_size;
+        }
+        if (tempStrat.sellStratBP.length > 0 && this.linkedChart.sellIndexList[this.clickIndex])
+        {
+            stri = "Sell triggered";
             this.ctx.fillText(stri, myCurX, myCurY, this.clickDataWidth);
             myCurY += font_size;
         }

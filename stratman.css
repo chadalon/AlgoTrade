@@ -129,17 +129,18 @@ canvas {
 }
 
 #stratDesign {
-    position: fixed;
     display: grid;
     grid-template-rows: min-content;
-    height: 30%;
     width: 100%;
     background-color: #aeaeae;
     overflow-y: scroll;
 }
 #botContain {
     display: grid;
-    grid-template-columns: 3fr 2fr;
+    grid-template-columns: 5fr 2fr;
+    height: 30%;
+    width: 100%;
+    position: fixed;
 }
 
 #topStratOptions {
@@ -164,7 +165,7 @@ canvas {
     overflow-x: scroll;
     overflow-y: hidden;
     /*109px + 160px is from the Buy:if length + dropdown length*/
-    max-width: calc(100vw - 269px);
+    max-width: calc(71vw - 269px);
 }
 .stratBox div {
     float: none;

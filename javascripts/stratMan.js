@@ -1966,3 +1966,4 @@ function EvalMath(first, second, operator) {
             alert('EvalMath error - operator was ' + operator);
     }
 }
+alert("make a result/strategy run class that will store a result with all relevant data as a member of chart. THEN results.js can just read from that chart's result. will clean up chart.js")
