@@ -6,7 +6,7 @@ This is a project made to design and backtest automated trading strategies - wit
 The beginning screen allows you to add as many account connections to each supported brokerage/exchange as you want. These are stored in a text file in JSON format.
 
 # Retrieving Data
-As of now, you can either load in data from a file (right now only works with aggregated trades with timestamp, amount, and price) or
+As of now, you can either load in data from a file (right now only works with aggregated trades sorted by timestamp, amount, and price) or
 by pulling from a supported brokerage/exchange with your API token.
 
 # Supported APIs
